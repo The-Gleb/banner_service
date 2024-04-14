@@ -412,7 +412,7 @@ func (s *bannerStorage) UpdateBanner(ctx context.Context, dto entity.UpdateBanne
 
 	slog.Info(query)
 
-	_, err = s.client.Exec(ctx, query)
+	_, err = tx.Exec(ctx, query)
 	if err != nil {
 		slog.Error("error inserting in banner_tag",
 			"error", err,
@@ -424,86 +424,85 @@ func (s *bannerStorage) UpdateBanner(ctx context.Context, dto entity.UpdateBanne
 		return errors.NewDomainError(errors.ErrDB, "")
 	}
 
-	// query = fmt.Sprintf(
-	// 	`UPDATE banner_feature
-	// 		SET feature_id = %d
-	// 		WHERE banner_id = %d;`,
-	// 	dto.FeatureID, dto.BannerID,
-	// )
+	query = fmt.Sprintf(
+		`UPDATE banner_feature
+			SET feature_id = %d
+			WHERE banner_id = %d;`,
+		dto.FeatureID, dto.BannerID,
+	)
 
-	// _, err = s.client.Exec(ctx, query)
-	// if err != nil {
-	// 	slog.Error("error updating banner_feature",
-	// 		"error", err,
-	// 	)
-	// 	var pgErr *pgconn.PgError
-	// 	if stdErrors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
-	// 		return errors.NewDomainError(errors.ErrTagNotFound, "")
-	// 	}
-	// 	return errors.NewDomainError(errors.ErrDB, "")
-	// }
+	_, err = s.client.Exec(ctx, query)
+	if err != nil {
+		slog.Error("error updating banner_feature",
+			"error", err,
+		)
+		var pgErr *pgconn.PgError
+		if stdErrors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
+			return errors.NewDomainError(errors.ErrTagNotFound, "")
+		}
+		return errors.NewDomainError(errors.ErrDB, "")
+	}
 
-	// query = fmt.Sprintf(
-	// 	`UPDATE banners
-	// 		SET title = '%s'
-	// 		WHERE id = %d;`,
-	// 	dto.Content.Title, dto.BannerID,
-	// )
+	query = fmt.Sprintf(
+		`UPDATE banners
+			SET title = '%s'
+			WHERE id = %d;`,
+		dto.Content.Title, dto.BannerID,
+	)
 
-	// _, err = s.client.Exec(ctx, query)
-	// if err != nil {
-	// 	slog.Error("error updating banners",
-	// 		"error", err,
-	// 	)
-	// 	return errors.NewDomainError(errors.ErrDB, "")
-	// }
+	_, err = s.client.Exec(ctx, query)
+	if err != nil {
+		slog.Error("error updating banners",
+			"error", err,
+		)
+		return errors.NewDomainError(errors.ErrDB, "")
+	}
 
-	// query = fmt.Sprintf(
-	// 	`UPDATE banners
-	// 		SET text = '%s'
-	// 		WHERE id = %d;`,
-	// 	dto.Content.Text, dto.BannerID,
-	// )
+	query = fmt.Sprintf(
+		`UPDATE banners
+			SET text = '%s'
+			WHERE id = %d;`,
+		dto.Content.Text, dto.BannerID,
+	)
 
-	// _, err = s.client.Exec(ctx, query)
-	// if err != nil {
-	// 	slog.Error("error updating banners",
-	// 		"error", err,
-	// 	)
-	// 	return errors.NewDomainError(errors.ErrDB, "")
-	// }
+	_, err = s.client.Exec(ctx, query)
+	if err != nil {
+		slog.Error("error updating banners",
+			"error", err,
+		)
+		return errors.NewDomainError(errors.ErrDB, "")
+	}
 
-	// query = fmt.Sprintf(
-	// 	`UPDATE banners
-	// 		SET url = '%s'
-	// 		WHERE id = %d;`,
-	// 	dto.Content.URL, dto.BannerID,
-	// )
+	query = fmt.Sprintf(
+		`UPDATE banners
+			SET url = '%s'
+			WHERE id = %d;`,
+		dto.Content.URL, dto.BannerID,
+	)
 
-	// _, err = s.client.Exec(ctx, query)
-	// if err != nil {
-	// 	slog.Error("error updating banners",
-	// 		"error", err,
-	// 	)
-	// 	return errors.NewDomainError(errors.ErrDB, "")
-	// }
+	_, err = s.client.Exec(ctx, query)
+	if err != nil {
+		slog.Error("error updating banners",
+			"error", err,
+		)
+		return errors.NewDomainError(errors.ErrDB, "")
+	}
 
-	// query = fmt.Sprintf(
-	// 	`UPDATE banners
-	// 	SET is_active = %t, updated_at = NOW()
-	// 	WHERE id = %d;`,
-	// 	dto.IsActive, dto.BannerID,
-	// )
+	query = fmt.Sprintf(
+		`UPDATE banners
+		SET is_active = %t, updated_at = NOW()
+		WHERE id = %d;`,
+		dto.IsActive, dto.BannerID,
+	)
 
-	// _, err = s.client.Exec(ctx, query)
-	// if err != nil {
-	// 	slog.Error("error updating banners",
-	// 		"error", err,
-	// 	)
-	// 	return errors.NewDomainError(errors.ErrDB, "")
-	// }
+	_, err = s.client.Exec(ctx, query)
+	if err != nil {
+		slog.Error("error updating banners",
+			"error", err,
+		)
+		return errors.NewDomainError(errors.ErrDB, "")
+	}
 
-	tx.Rollback(ctx)
 	err = tx.Commit(ctx)
 	if err != nil {
 		slog.Error("error commiting transaction",
@@ -620,11 +619,11 @@ func isUnique(ctx context.Context, tx pgx.Tx, tagsID []int64, featureID int64) (
 	query := fmt.Sprintf(
 		`SELECT banner_id
 		FROM banner_tag
-			WHERE banner_id NOT IN(
-				SELECT banner_id FROM banner_tag bt
-				WHERE bt.tag_id NOT IN(%s)
-				GROUP BY banner_id
-			)
+		WHERE banner_id NOT IN(
+			SELECT banner_id FROM banner_tag bt
+			WHERE bt.tag_id NOT IN(%s)
+			GROUP BY banner_id
+		)
 		GROUP BY banner_id
 		HAVING COUNT(tag_id) = %d;`,
 		tagsString, len(tagsID),
