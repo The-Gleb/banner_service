@@ -17,6 +17,8 @@ const (
 	ErrUnauthorized ErrorCode = "Unauthorized"
 
 	ErrForbidden ErrorCode = "access is forbidden"
+
+	ErrNotCached ErrorCode = "banner not found in cache"
 )
 
 type domainError struct {

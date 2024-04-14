@@ -18,7 +18,7 @@ type createBannerUsecase struct {
 	bannerService BannerService
 }
 
-func NewcreateBannerUsecase(bannerService BannerService) *createBannerUsecase {
+func NewCreateBannerUsecase(bannerService BannerService) *createBannerUsecase {
 	return &createBannerUsecase{bannerService}
 }
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/The-Gleb/banner_service/internal/domain/entity"
 	"github.com/The-Gleb/banner_service/internal/domain/usecase"
@@ -47,11 +48,22 @@ func (service *bannerService) GetUserBanner(ctx context.Context, dto entity.GetU
 
 	if dto.UseLastRevision {
 		banner, err := service.storage.GetUserBanner(ctx, dto)
+		if err != nil {
+			return entity.BannerContent{}, err
+		}
+
+		err = service.cache.Set(ctx, banner)
+		if err != nil {
+			return entity.BannerContent{}, err
+		}
+
 		return banner.Content, err
 	}
 
 	content, err := service.cache.Get(ctx, dto)
 	if err == nil {
+		content.Title += " from cache" // added for tests
+		slog.Debug("banner found in cache")
 		return content, nil
 	}
 

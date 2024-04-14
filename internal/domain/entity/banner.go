@@ -1,6 +1,9 @@
 package entity
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Banner struct {
 	BannerID  int64
@@ -16,4 +19,16 @@ type BannerContent struct {
 	Title string `json:"title" redis:"title"`
 	Text  string `json:"text" redis:"text"`
 	URL   string `json:"url" redis:"url"`
+}
+
+func (b BannerContent) MarshalBinary() ([]byte, error) {
+	return json.Marshal(b)
+}
+
+func (b *BannerContent) UnmarshalBinary(data []byte) error {
+	err := json.Unmarshal(data, &b)
+	if err != nil {
+		return err
+	}
+	return nil
 }
