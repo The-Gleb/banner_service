@@ -3,7 +3,9 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/The-Gleb/banner_service/internal/domain/entity"
 	"github.com/The-Gleb/banner_service/internal/errors"
@@ -47,16 +49,28 @@ func (h *updateBannerHandler) Middlewares(md ...func(http.Handler) http.Handler)
 
 func (h *updateBannerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
+	strID := chi.URLParam(r, "id")
+
+	ID, err := strconv.ParseInt(strID, 10, 64)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	var dto entity.UpdateBannerDTO
 
-	err := json.NewDecoder(r.Body).Decode(&dto)
+	err = json.NewDecoder(r.Body).Decode(&dto)
 	if err != nil {
 		http.Error(w, "error decoding json request body", http.StatusBadRequest)
 		return
 	}
 
+	dto.BannerID = ID
+
 	// is_active will updated to false until otherwise stated
-	if dto.BannerID == 0 {
+	if dto.BannerID == 0 || dto.FeatureID == 0 || len(dto.TagIDs) == 0 ||
+		dto.Content.Title == "" || dto.Content.Text == "" || dto.Content.URL == "" {
+		slog.Debug("bad request", "error", "banner id must be specified")
 		http.Error(w, "banner id must be specified", http.StatusBadRequest)
 		return
 	}

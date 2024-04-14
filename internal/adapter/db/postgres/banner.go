@@ -365,148 +365,145 @@ func (s *bannerStorage) UpdateBanner(ctx context.Context, dto entity.UpdateBanne
 	}
 	defer tx.Rollback(ctx)
 
-	if len(dto.TagIDs) > 0 {
-		unique, err := isUnique(ctx, tx, dto.TagIDs, dto.FeatureID)
-		if err != nil {
-			return errors.NewDomainError(errors.ErrDB, "")
-		}
-
-		if !unique {
-			return errors.NewDomainError(errors.ErrAlreadyExists, "banner with these tags and feature already exists")
-		}
-
-		c, err := tx.Exec(
-			ctx,
-			`DELETE FROM banner_tag
-			WHERE banner_id = $1;`,
-			dto.BannerID,
-		)
-
-		if err != nil {
-			slog.Error("error updating banner_tag",
-				"error", err,
-			)
-			return errors.NewDomainError(errors.ErrDB, "")
-		}
-		if c.RowsAffected() == 0 {
-			slog.Error("error updating banner_tag, id not found")
-			return errors.NewDomainError(errors.ErrNoDataFound, "")
-		}
-
-		tagsString := ""
-		for _, tagID := range dto.TagIDs {
-			tagsString += fmt.Sprintf("(%d, %d),", dto.BannerID, tagID)
-		}
-		tagsString = strings.TrimSuffix(tagsString, ",")
-
-		query := fmt.Sprintf(
-			`INSERT INTO
-				banner_tag ("banner_id", "tag_id)
-			VALUES
-				%s;`,
-			tagsString,
-		)
-
-		_, err = s.client.Exec(ctx, query)
-		if err != nil {
-			slog.Error("error inserting in banner_tag",
-				"error", err,
-			)
-			var pgErr *pgconn.PgError
-			if stdErrors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
-				return errors.NewDomainError(errors.ErrTagNotFound, "")
-			}
-			return errors.NewDomainError(errors.ErrDB, "")
-		}
+	unique, err := isUnique(ctx, tx, dto.TagIDs, dto.FeatureID)
+	if err != nil {
+		return errors.NewDomainError(errors.ErrDB, "")
 	}
 
-	if dto.BannerID != 0 {
-		query := fmt.Sprintf(
-			`UPDATE banner_feature
-			SET feature_id = %d
-			WHERE banner_id = %d;`,
-			dto.FeatureID, dto.BannerID,
-		)
-
-		_, err = s.client.Exec(ctx, query)
-		if err != nil {
-			slog.Error("error updating banner_feature",
-				"error", err,
-			)
-			var pgErr *pgconn.PgError
-			if stdErrors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
-				return errors.NewDomainError(errors.ErrTagNotFound, "")
-			}
-			return errors.NewDomainError(errors.ErrDB, "")
-		}
-	}
-
-	if dto.Content.Title != "" {
-		query := fmt.Sprintf(
-			`UPDATE banners
-			SET title = %s
-			WHERE banner_id = %d;`,
-			dto.Content.Title, dto.BannerID,
-		)
-
-		_, err = s.client.Exec(ctx, query)
-		if err != nil {
-			slog.Error("error updating banners",
-				"error", err,
-			)
-			return errors.NewDomainError(errors.ErrDB, "")
-		}
-	}
-
-	if dto.Content.Text != "" {
-		query := fmt.Sprintf(
-			`UPDATE banners
-			SET text = %s
-			WHERE banner_id = %d;`,
-			dto.Content.Text, dto.BannerID,
-		)
-
-		_, err = s.client.Exec(ctx, query)
-		if err != nil {
-			slog.Error("error updating banners",
-				"error", err,
-			)
-			return errors.NewDomainError(errors.ErrDB, "")
-		}
-	}
-
-	if dto.Content.URL != "" {
-		query := fmt.Sprintf(
-			`UPDATE banners
-			SET url = %s
-			WHERE banner_id = %d;`,
-			dto.Content.URL, dto.BannerID,
-		)
-
-		_, err = s.client.Exec(ctx, query)
-		if err != nil {
-			slog.Error("error updating banners",
-				"error", err,
-			)
-			return errors.NewDomainError(errors.ErrDB, "")
-		}
+	if !unique {
+		slog.Debug("update params violate unique constraint")
+		return errors.NewDomainError(errors.ErrAlreadyExists, "banner with these tags and feature already exists")
 	}
 
 	query := fmt.Sprintf(
-		`UPDATE banners
-		SET is_active = %t, updated_at = NOW() 
+		`DELETE FROM banner_tag
 		WHERE banner_id = %d;`,
-		dto.IsActive, dto.BannerID,
+		dto.BannerID,
 	)
 
-	_, err = s.client.Exec(ctx, query)
+	c, err := tx.Exec(ctx, query)
+
 	if err != nil {
-		slog.Error("error updating banners",
+		slog.Error("error updating banner_tag",
 			"error", err,
 		)
 		return errors.NewDomainError(errors.ErrDB, "")
 	}
+	if c.RowsAffected() == 0 {
+		slog.Error("error updating banner_tag, id not found")
+		return errors.NewDomainError(errors.ErrNoDataFound, "")
+	}
 
+	slog.Debug("tags", "slice", dto.TagIDs)
+
+	tagsString := ""
+	for _, tagID := range dto.TagIDs {
+		tagsString += fmt.Sprintf("(%d, %d),", dto.BannerID, tagID)
+	}
+	tagsString = strings.TrimSuffix(tagsString, ",")
+
+	query = fmt.Sprintf(
+		`INSERT INTO
+				banner_tag ("banner_id", "tag_id")
+			VALUES
+				%s;`,
+		tagsString,
+	)
+
+	slog.Info(query)
+
+	_, err = s.client.Exec(ctx, query)
+	if err != nil {
+		slog.Error("error inserting in banner_tag",
+			"error", err,
+		)
+		var pgErr *pgconn.PgError
+		if stdErrors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
+			return errors.NewDomainError(errors.ErrTagNotFound, "")
+		}
+		return errors.NewDomainError(errors.ErrDB, "")
+	}
+
+	// query = fmt.Sprintf(
+	// 	`UPDATE banner_feature
+	// 		SET feature_id = %d
+	// 		WHERE banner_id = %d;`,
+	// 	dto.FeatureID, dto.BannerID,
+	// )
+
+	// _, err = s.client.Exec(ctx, query)
+	// if err != nil {
+	// 	slog.Error("error updating banner_feature",
+	// 		"error", err,
+	// 	)
+	// 	var pgErr *pgconn.PgError
+	// 	if stdErrors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
+	// 		return errors.NewDomainError(errors.ErrTagNotFound, "")
+	// 	}
+	// 	return errors.NewDomainError(errors.ErrDB, "")
+	// }
+
+	// query = fmt.Sprintf(
+	// 	`UPDATE banners
+	// 		SET title = '%s'
+	// 		WHERE id = %d;`,
+	// 	dto.Content.Title, dto.BannerID,
+	// )
+
+	// _, err = s.client.Exec(ctx, query)
+	// if err != nil {
+	// 	slog.Error("error updating banners",
+	// 		"error", err,
+	// 	)
+	// 	return errors.NewDomainError(errors.ErrDB, "")
+	// }
+
+	// query = fmt.Sprintf(
+	// 	`UPDATE banners
+	// 		SET text = '%s'
+	// 		WHERE id = %d;`,
+	// 	dto.Content.Text, dto.BannerID,
+	// )
+
+	// _, err = s.client.Exec(ctx, query)
+	// if err != nil {
+	// 	slog.Error("error updating banners",
+	// 		"error", err,
+	// 	)
+	// 	return errors.NewDomainError(errors.ErrDB, "")
+	// }
+
+	// query = fmt.Sprintf(
+	// 	`UPDATE banners
+	// 		SET url = '%s'
+	// 		WHERE id = %d;`,
+	// 	dto.Content.URL, dto.BannerID,
+	// )
+
+	// _, err = s.client.Exec(ctx, query)
+	// if err != nil {
+	// 	slog.Error("error updating banners",
+	// 		"error", err,
+	// 	)
+	// 	return errors.NewDomainError(errors.ErrDB, "")
+	// }
+
+	// query = fmt.Sprintf(
+	// 	`UPDATE banners
+	// 	SET is_active = %t, updated_at = NOW()
+	// 	WHERE id = %d;`,
+	// 	dto.IsActive, dto.BannerID,
+	// )
+
+	// _, err = s.client.Exec(ctx, query)
+	// if err != nil {
+	// 	slog.Error("error updating banners",
+	// 		"error", err,
+	// 	)
+	// 	return errors.NewDomainError(errors.ErrDB, "")
+	// }
+
+	tx.Rollback(ctx)
 	err = tx.Commit(ctx)
 	if err != nil {
 		slog.Error("error commiting transaction",
