@@ -6,7 +6,6 @@ import (
 	stdErrors "errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -22,6 +21,7 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 var _ service.BannerStorage = new(bannerStorage)
@@ -198,40 +198,65 @@ func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO
 	}
 	defer tx.Rollback(ctx)
 
-	tagID, tagOK := dto.Filters["tag"]
-	featureID, featureOK := dto.Filters["feature"]
+	// tagID, tagOK := dto.Filters["tag"]
+	// featureID, featureOK := dto.Filters["feature"]
 
 	query := `SELECT
-			bt.banner_id, feature_id, array_agg(tag_id)
-		FROM
-			banner_tag bt JOIN banner_feature bf
-			ON bt.banner_id = bf.banner_id
-			`
+    bt.banner_id,
+    feature_id,
+    ARRAY_AGG(tag_id)
+	FROM
+		banner_tag bt
+		JOIN banner_feature bf
+		ON bt.banner_id = bf.banner_id
+	WHERE
+		bt.banner_id IN (
+        SELECT
+            bt.banner_id
+        FROM
+            banner_tag bt
+            JOIN banner_feature bf ON bt.banner_id = bf.banner_id
+        WHERE
+	`
 
-	if tagOK {
+	for k, v := range dto.Filters {
 		query = fmt.Sprintf(
 			`%s
-			WHERE tag_id = %d
-				`,
-			query, tagID,
+			%s_id = %d
+			AND`,
+			query, k, v,
 		)
 	}
 
-	query += "GROUP BY bt.banner_id, feature_id"
+	query = strings.TrimSuffix(query, "AND")
 
-	if featureOK {
-		query = fmt.Sprintf(
-			`%s
-			HAVING feature_id = %d
-			`,
-			query, featureID,
-		)
-	}
+	// if tagOK {
+	// 	query = fmt.Sprintf(
+	// 		`%s
+	// 		WHERE tag_id = %d
+	// 			`,
+	// 		query, tagID,
+	// 	)
+	// }
+
+	// query += "GROUP BY bt.banner_id, feature_id"
+
+	// if featureOK {
+	// 	query = fmt.Sprintf(
+	// 		`%s
+	// 		HAVING feature_id = %d
+	// 		`,
+	// 		query, featureID,
+	// 	)
+	// }
 
 	query = fmt.Sprintf(
 		`%s
 		LIMIT %d
-		OFFSET %d;`,
+		OFFSET %d)
+		GROUP BY
+			bt.banner_id,
+			feature_id;`,
 		query, dto.Limit, dto.Offset,
 	)
 
@@ -251,7 +276,7 @@ func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO
 
 	bannerIDs, err := pgx.CollectRows[string](rows, func(row pgx.CollectableRow) (string, error) {
 		var banner entity.Banner
-		var stringTags string // TODO: fix
+		var stringTags pgtype.FlatArray[int64]
 		err := rows.Scan(&banner.BannerID, &banner.FeatureID, &stringTags)
 		if err != nil {
 			slog.Error("error scanning row",
@@ -260,22 +285,9 @@ func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO
 			return "", errors.NewDomainError(errors.ErrDB, "")
 		}
 
-		stringTagsSlice := strings.Split(stringTags, ",")
-		banner.TagIDs = make([]int64, 0, len(stringTagsSlice))
+		banner.TagIDs = stringTags
 
-		for _, strTag := range stringTagsSlice {
-			intTag, err := strconv.ParseInt(strTag, 10, 64)
-			if err != nil {
-				slog.Error("error parsing tag to int64",
-					"error", err,
-				)
-				return "", errors.NewDomainError(errors.ErrDB, "")
-			}
-			banner.TagIDs = append(banner.TagIDs, intTag)
-		}
-
-		bannerSlice = slices.Grow(bannerSlice, 1)
-		bannerSlice[index] = banner
+		bannerSlice = append(bannerSlice, banner)
 		bannerIndexes[banner.BannerID] = index
 		index++
 
@@ -609,16 +621,15 @@ func isUnique(ctx context.Context, tx pgx.Tx, tagsID []int64, featureID int64) (
 	slog.Debug("tags string", "string", tagsString)
 
 	query := fmt.Sprintf(
-		`SELECT
-			banner_id
-		FROM
-			banner_tag
-		WHERE
-			"tag_id" IN (%s)
-		GROUP BY
-			"banner_id"
-		HAVING
-			COUNT(tag_id) = %d;`,
+		`SELECT banner_id
+		FROM banner_tag
+			WHERE banner_id NOT IN(
+				SELECT banner_id FROM banner_tag bt
+				WHERE bt.tag_id NOT IN(%s)
+				GROUP BY banner_id
+			)
+		GROUP BY banner_id
+		HAVING COUNT(tag_id) = %d;`,
 		tagsString, len(tagsID),
 	)
 
@@ -630,11 +641,15 @@ func isUnique(ctx context.Context, tx pgx.Tx, tagsID []int64, featureID int64) (
 		return false, errors.NewDomainError(errors.ErrDB, "")
 	}
 
-	bannerIDs, err := pgx.CollectRows[int64](rows, func(row pgx.CollectableRow) (int64, error) {
-		var id int64
+	bannerIDs, err := pgx.CollectRows[string](rows, func(row pgx.CollectableRow) (string, error) {
+		var id string
 		err := row.Scan(&id)
 		return id, err
 	})
+
+	if len(bannerIDs) == 0 {
+		return true, nil
+	}
 
 	if err != nil {
 		slog.Error("error collecting rows",
@@ -642,8 +657,6 @@ func isUnique(ctx context.Context, tx pgx.Tx, tagsID []int64, featureID int64) (
 		)
 		return false, errors.NewDomainError(errors.ErrDB, "")
 	}
-
-	bannerIDsString := strings.Trim(strings.ReplaceAll(fmt.Sprint(bannerIDs), " ", ", "), "[]")
 
 	query = fmt.Sprintf(
 		`SELECT CASE WHEN EXISTS (
@@ -653,7 +666,7 @@ func isUnique(ctx context.Context, tx pgx.Tx, tagsID []int64, featureID int64) (
 		)
 		THEN FALSE
 		ELSE TRUE END;`,
-		bannerIDsString, featureID,
+		strings.Join(bannerIDs, ","), featureID,
 	)
 
 	row := tx.QueryRow(ctx, query)
