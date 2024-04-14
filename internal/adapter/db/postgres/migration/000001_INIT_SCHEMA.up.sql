@@ -30,7 +30,7 @@ CREATE TABLE "banner_feature" (
 
 CREATE TABLE "tokens" (
   "id" bigserial PRIMARY KEY,
-  "token" UNIQUE,
+  "token" varchar UNIQUE,
   "is_admin" boolean,
   "created_at" timestamp
 );
@@ -42,9 +42,3 @@ ALTER TABLE "banner_tag" ADD FOREIGN KEY ("tag_id") REFERENCES "tags" ("id");
 ALTER TABLE "banner_feature" ADD FOREIGN KEY ("banner_id") REFERENCES "banners" ("id");
 
 ALTER TABLE "banner_feature" ADD FOREIGN KEY ("feature_id") REFERENCES "features" ("id");
-
-INSERT INTO
-  tags ("id")
-VALUES
-   (1),(2),(3),(4),(5);
-

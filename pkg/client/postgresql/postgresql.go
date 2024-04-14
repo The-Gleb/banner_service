@@ -2,11 +2,9 @@ package postgresql
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/The-Gleb/banner_service/internal/config"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,8 +17,8 @@ type Client interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
-func NewClient(ctx context.Context, sc config.Database) (pool *pgxpool.Pool, err error) {
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", sc.Username, sc.Password, sc.Host, sc.Port, sc.DbName)
+func NewClient(ctx context.Context, dsn string) (pool *pgxpool.Pool, err error) {
+	// dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", sc.Username, sc.Password, sc.Host, sc.Port, sc.DbName)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
