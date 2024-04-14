@@ -5,15 +5,20 @@ import (
 	stdErrors "errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/The-Gleb/banner_service/internal/domain/entity"
+	"github.com/The-Gleb/banner_service/internal/domain/service"
 	"github.com/The-Gleb/banner_service/internal/errors"
 	"github.com/The-Gleb/banner_service/pkg/client/postgresql"
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+var _ service.BannerStorage = new(bannerStorage)
 
 type bannerStorage struct {
 	client postgresql.Client
@@ -248,7 +253,7 @@ func (s *bannerStorage) GetUserBanner(ctx context.Context, dto entity.GetUserBan
 
 }
 
-func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO) ([]entity.BannerContent, error) {
+func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO) ([]entity.Banner, error) {
 
 	tx, err := s.client.Begin(ctx)
 	if err != nil {
@@ -262,8 +267,9 @@ func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO
 	tagID, tagOK := dto.Filters["tag"]
 	featureID, featureOK := dto.Filters["feature"]
 
+	// TODO:
 	query := `SELECT
-			banner_id
+			banner_id, feature_id, array_agg(tag_id)
 		FROM
 			banner_tag JOIN banner_feature
 			ON banner_tag.banner_id = banner_feature.banner_id
@@ -305,10 +311,41 @@ func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO
 		return nil, errors.NewDomainError(errors.ErrDB, "")
 	}
 
-	bannerIDs, err := pgx.CollectRows[int64](rows, func(row pgx.CollectableRow) (int64, error) {
-		var id int64
-		err := row.Scan(&id)
-		return id, err
+	bannerIndexes := make(map[int64]int)
+	bannerSlice := make([]entity.Banner, 0)
+	index := 0
+
+	bannerIDs, err := pgx.CollectRows[string](rows, func(row pgx.CollectableRow) (string, error) {
+		var banner entity.Banner
+		var stringTags string
+		err := rows.Scan(&banner.BannerID, &banner.FeatureID, &stringTags)
+		if err != nil {
+			slog.Error("error scanning row",
+				"error", err,
+			)
+			return "", errors.NewDomainError(errors.ErrDB, "")
+		}
+
+		stringTagsSlice := strings.Split(stringTags, ",")
+		banner.TagIDs = make([]int64, 0, len(stringTagsSlice))
+
+		for _, strTag := range stringTagsSlice {
+			intTag, err := strconv.ParseInt(strTag, 10, 64)
+			if err != nil {
+				slog.Error("error parsing tag to int64",
+					"error", err,
+				)
+				return "", errors.NewDomainError(errors.ErrDB, "")
+			}
+			banner.TagIDs = append(banner.TagIDs, intTag)
+		}
+
+		bannerSlice = slices.Grow(bannerSlice, 1)
+		bannerSlice[index] = banner
+		bannerIndexes[banner.BannerID] = index
+		index++
+
+		return strconv.FormatInt(banner.BannerID, 10), nil
 	})
 	if err != nil {
 		slog.Error("error collecting rows",
@@ -317,13 +354,11 @@ func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO
 		return nil, errors.NewDomainError(errors.ErrDB, "")
 	}
 
-	bannerIDsString := fmt.Sprint(bannerIDs)
-
 	query = fmt.Sprintf(
-		`SELECT title, text, url
+		`SELECT id, title, text, url
 		FROM banners
-		WHERE id IN %s;`,
-		bannerIDsString,
+		WHERE id IN (%s);`,
+		strings.Join(bannerIDs, ", "),
 	)
 
 	rows, err = tx.Query(ctx, query)
@@ -334,13 +369,29 @@ func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO
 		return nil, errors.NewDomainError(errors.ErrDB, "")
 	}
 
-	bannersContent, err := pgx.CollectRows[entity.BannerContent](rows, func(row pgx.CollectableRow) (entity.BannerContent, error) {
-		var c entity.BannerContent
-		err := row.Scan(&c.Title, &c.Text, &c.URL)
-		return c, err
-	})
-	if err != nil {
-		slog.Error("error collecting rows",
+	for rows.Next() {
+		var (
+			id    int64
+			title string
+			text  string
+			url   string
+		)
+		err := rows.Scan(&id, &title, &text, &url)
+		if err != nil {
+			slog.Error("error scanning rows",
+				"error", err,
+			)
+			return nil, errors.NewDomainError(errors.ErrDB, "")
+		}
+
+		bannerSlice[bannerIndexes[id]].Content.Title = title
+		bannerSlice[bannerIndexes[id]].Content.Text = text
+		bannerSlice[bannerIndexes[id]].Content.URL = url
+
+	}
+
+	if err := rows.Err(); err != nil {
+		slog.Error("error scanning rows",
 			"error", err,
 		)
 		return nil, errors.NewDomainError(errors.ErrDB, "")
@@ -354,7 +405,7 @@ func (s *bannerStorage) GetBanners(ctx context.Context, dto entity.GetBannersDTO
 		return nil, errors.NewDomainError(errors.ErrDB, "")
 	}
 
-	return bannersContent, nil
+	return bannerSlice, nil
 }
 
 func (s *bannerStorage) UpdateBanner(ctx context.Context, dto entity.UpdateBannerDTO) error {

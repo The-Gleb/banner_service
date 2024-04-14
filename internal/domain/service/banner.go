@@ -4,7 +4,11 @@ import (
 	"context"
 
 	"github.com/The-Gleb/banner_service/internal/domain/entity"
+	"github.com/The-Gleb/banner_service/internal/domain/usecase"
 )
+
+var _ usecase.BannerService = new(bannerService)
+var _ usecase.TokenService = new(tokenService)
 
 type BannerStorage interface {
 	CreateBanner(ctx context.Context, dto entity.CreateBannerDTO) (int64, error)
